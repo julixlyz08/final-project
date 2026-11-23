@@ -37,9 +37,17 @@ def short(obj, n=110):
     return s if len(s) <= n else s[: n - 3] + "..."
 
 
-def ask_human(name, args):
-    """Approval at the terminal. The human sees exactly what would happen."""
+def ask_human(name, args, history=()):
+    """Approval at the terminal. The human sees the decision material, not just a tool name."""
     print(f"        HUMAN  approval needed for {name}({json.dumps(args)})")
+    rec = next((h["result"] for h in reversed(history) if h.get("tool") == "recommend_action"
+                and h.get("status") == "allowed" and h.get("args", {}).get("record_id") == args.get("record_id")), None)
+    if rec:
+        drivers = ", ".join(f"{d['feature']}={d['value']}" for d in rec.get("drivers", []))
+        print("        DECISION MATERIAL for the approver")
+        print(f"          department {args.get('member')}, enrollment {args.get('record_id')}")
+        print(f"          risk {rec['probability']} ({rec['band']}); top drivers: {drivers}")
+        print(f"          why this action: {rec.get('why', '')}")
     while True:
         ans = input("        approve? [y/n] ").strip().lower()
         if ans in ("y", "yes"):
@@ -97,7 +105,7 @@ def run_task(task, planner, policy, approve="ask", max_steps=12, quiet=False):
                     print(f"        POLICY approval required: {d.reason}")
                 ok = {"auto": True, "deny": False}.get(approve)
                 if ok is None:
-                    ok = ask_human(name, args)
+                    ok = ask_human(name, args, history)
                 aud.event(task_id, "approval", tool=name, args=args, outcome="approved" if ok else "rejected", mode=approve)
                 if not ok:
                     entry.update(status="rejected", reason="human rejected the action")

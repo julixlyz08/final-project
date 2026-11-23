@@ -48,3 +48,37 @@ def rank_records_by_risk(member, top_k=5, month=None):
     return {"member": member, "month": month, "considered": len(idx),
             "records": [{"record_id": c.ids[i], "probability": round(float(probs[i]), 3), "band": M.band(float(probs[i]), m["threshold_high_risk"])} for i in top],
             "high_risk_share": round(float((probs[idx] >= m["threshold_high_risk"]).mean()), 3) if idx else None}
+
+
+@T.tool(
+    "calibration_check",
+    "Compare predicted and observed outcome rates for one member "
+    "on the neutral evaluation set. Returns aggregate results only.",
+    T.obj_schema({"member": ("string", "A consortium member, such as Real Estate")}),
+    kind="analyze",
+)
+def calibration_check(member):
+    world = D.world()
+    names = [client.name for client in world.clients]
+    if member not in names:
+        return {"error": f"Unknown member: {member}"}
+
+    X, y = world.test_for(names.index(member))
+    if len(y) == 0:
+        return {"error": f"No evaluation records for {member}"}
+
+    m = _m()
+    feature_index = {name: i for i, name in enumerate(world.features)}
+    columns = [feature_index[name] for name in m["features"]]
+    probabilities = M.sigmoid(X[:, columns] @ np.asarray(m["weights"]) + m["bias"])
+    predicted_rate = float(probabilities.mean())
+    actual_rate = float(y.mean())
+
+    return {
+        "member": member,
+        "n": len(y),
+        "predicted_rate": round(predicted_rate, 4),
+        "actual_rate": round(actual_rate, 4),
+        "accuracy": m["per_member_accuracy"][member],
+        "gap": round(predicted_rate - actual_rate, 4),
+    }

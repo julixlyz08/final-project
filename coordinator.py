@@ -23,10 +23,10 @@ from agent.planner import OpenAIPlanner  # noqa: E402
 from specialists import _data as D  # noqa: E402
 
 LENS = {
-    "diagnostic": ["why", "differ", "compare", "driver", "cause", "versus", " vs ", "explain"],
+    "diagnostic": ["why", "differ", "compare", "driver", "cause", "versus", " vs ", "explain", "except", "flip"],
     "predictive": ["predict", "will ", "risk", "likely", "high-risk", "high risk", "score"],
     "prescriptive": ["should", "recommend", "whom", "who do we", "what to do", "action", "call first", "reorder", "isolate", "hold", "outreach", "restructure"],
-    "descriptive": ["how many", "rate", "trend", "which segment", "which ward", "breakdown", "summar", "volume", "mix", "by month", "drive", "carry"],
+    "descriptive": ["how many", "rate", "trend", "which segment", "which ward", "breakdown", "summar", "volume", "mix", "by month", "drive", "carry", "where are the failures", "month over month", "rise", "rose"],
 }
 
 
@@ -40,6 +40,17 @@ def members_in(q):
     names = [c.name for c in D.world().clients]
     found = [n for n in names if n.lower() in q.lower()]
     return sorted(found, key=lambda n: q.lower().index(n.lower()))
+
+
+def segments_in(q):
+    """Segment columns named in the question, by full name or a short stem (course_level: 'level'; modality: 'modalit')."""
+    t = q.lower()
+    out = []
+    for s in D.world().segments:
+        stems = {s, s.replace("_", " "), s.split("_")[-1].rstrip("s"), s[:-1] if s.endswith("y") else s}
+        if any(st and st in t for st in stems):
+            out.append(s)
+    return out
 
 
 def record_ids_in(q):
@@ -68,11 +79,15 @@ class ScriptedCoordinator:
         if "descriptive" in lenses:
             for m in members[:2]:
                 plan.append(("summarize_member", {"member": m}))
-            seg = next((s for s in D.world().segments if s in q.lower()), None)
-            if seg:
-                plan.append(("segment_breakdown", {"member": members[0], "segment": seg}))
+            segs = segments_in(q)
+            seg = segs[0] if segs else None
+            all_members = any(k in q.lower() for k in ("each department", "every department", "all departments", "across"))
+            for sg in segs:
+                plan.append(("segment_rates_all_members", {"segment": sg}) if all_members else ("segment_breakdown", {"member": members[0], "segment": sg}))
             if "month" in q.lower() or "trend" in q.lower():
                 plan.append(("trend_by_month", {"member": members[0]}))
+            if month and month >= 2 and ("change" in q.lower() or "month over month" in q.lower() or "previous" in q.lower()):
+                plan.append(("compare_month_over_month", {"member": members[0], "month": month}))
         if "diagnostic" in lenses:
             if len(members) >= 2:
                 plan.append(("compare_members", {"member_a": members[0], "member_b": members[1]}))
@@ -80,15 +95,30 @@ class ScriptedCoordinator:
                 others = [c.name for c in D.world().clients if c.name != members[0]]
                 plan.append(("compare_members", {"member_a": members[0], "member_b": others[0]}))
             plan.append(("rank_drivers", {"member": members[0], "top_k": 5}))
-        if "predictive" in lenses or "prescriptive" in lenses:
+            seg_d = (segments_in(q) or [None])[0]
+            if seg_d or any(k in q.lower() for k in ("gateway", "course")):
+                plan.append(("segment_driver", {"member": members[0], "segment": seg_d or "course_level"}))
+            feat = next((f for f in D.features() if f in q.lower() or f.replace("_", " ") in q.lower() or (f == "hours_worked_per_week" and "working hours" in q.lower())), None)
+            if feat:
+                plan.append(("driver_signs_all_members", {"feature": feat}))
+        ql = q.lower()
+        # Campus rule: a question about the MODEL for a department (gain, federation, charter) gets aggregate checks for
+        # that department; record-level scoring then runs only for the home member, and only if students are asked about.
+        model_q = any(k in ql for k in ("federation", "charter", "own model", "gain", "calibrat", "trust the model", "fine-tune"))
+        record_q = bool(rids) or any(k in ql for k in ("at risk", "high risk", "high-risk", "whom", "contact", "which students", "students are"))
+        record_member = home if model_q else members[0]
+        if "predictive" in lenses or "prescriptive" in lenses or model_q:
             plan.append(("model_card_facts", {}))
+            if model_q:
+                for m in [m for m in members if m != home] or [home]:
+                    plan.append(("calibration_check", {"member": m}))
             if rids:
                 for rid in rids[:3]:
-                    plan.append(("predict_record", {"member": members[0], "record_id": rid}))
-            else:
-                plan.append(("rank_records_by_risk", {"member": members[0], "top_k": 3, **({"month": month} if month else {})}))
-        if "prescriptive" in lenses:
-            plan.append(("__prescribe__", {"member": members[0]}))
+                    plan.append(("predict_record", {"member": record_member, "record_id": rid}))
+            elif record_q or not model_q:
+                plan.append(("rank_records_by_risk", {"member": record_member, "top_k": 3, **({"month": month} if month else {})}))
+        if "prescriptive" in lenses and (record_q or not model_q):
+            plan.append(("__prescribe__", {"member": record_member}))
         if "export" in q.lower():
             plan.insert(0, ("export_records", {"destination": "external"}))
         forb = [a["name"] for a in D.world().schema["actions"] if a["kind"] == "forbidden"]
@@ -146,11 +176,26 @@ class ScriptedCoordinator:
             elif t == "predict_record":
                 parts.append(f"{r['record_id']}: {r['probability']} ({r['band']}), drivers " + ", ".join(d["feature"] for d in r["drivers"]) + ".")
             elif t == "recommend_action":
-                parts.append(f"Recommend {r['recommended_action']} for {r['record_id']}" + (" (human approval)" if r["needs_human"] else "") + ".")
+                parts.append(f"Recommend {r['recommended_action']} for {r['record_id']}" + (" (human approval)" if r["needs_human"] else "") + f": {r.get('why', '')}.")
+            elif t == "compare_month_over_month":
+                parts.append(f"{r['member']} month {r['month']['month']}: failure rate {r['month']['failure_rate']} vs {r['previous_month']['failure_rate']} in month {r['previous_month']['month']} ({r['change']['direction']}, {r['change']['percentage_points']:+.1f} points).")
+            elif t == "segment_rates_all_members":
+                parts.append(f"By {r['segment']} in each department: " + "; ".join(f"{m['member']} " + ", ".join(f"{k} {v['failure_rate']}" for k, v in m["rates"].items()) for m in r["members"]) + ".")
+            elif t == "segment_driver":
+                g = r["carries_the_gap"]
+                parts.append(f"At {r['member']}, {g['value']} ({g['segment']}) carries the most excess failures: {g['outcome_rate']} against {r['member_outcome_rate']} overall.")
+            elif t == "driver_signs_all_members":
+                for feat, by in r["correlation_by_member"].items():
+                    flips = [f["member"] for f in r.get("sign_flips", []) if f["feature"] == feat]
+                    parts.append(f"{feat} by department: " + ", ".join(f"{k} {v:+.3f}" for k, v in by.items()) + (f"; the sign flips at {', '.join(flips)}." if flips else "."))
+            elif t == "calibration_check":
+                parts.append(f"Model fit at {r['member']}: predicted {r['predicted_rate']} vs actual {r['actual_rate']} (gap {r['gap']:+.3f}), accuracy {r['accuracy']} on {r['n']} evaluation rows.")
             elif t == "model_card_facts":
                 parts.append(f"Model: accuracy {r['neutral_test_accuracy']}, gate {r['gate_decision']}.")
             elif h["status"] == "approved":
                 parts.append(f"Done: {t} for {r.get('record_id')} (approved).")
+            elif t == "refer_to_tutoring":
+                parts.append(f"Done: refer_to_tutoring for {r.get('record_id')} (logged, no approval needed).")
         return " ".join(parts) if parts else "No tool produced a result."
 
 
