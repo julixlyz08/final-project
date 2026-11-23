@@ -1,13 +1,14 @@
 {
   "policy_name": "Nazarian Advising Consortium Analytics Agent Policy",
-  "policy_version": "1.0",
+  "policy_version": "1.1",
   "system": "Nazarian advising consortium analytics agent team",
   "owner": "Accounting Department Advising Office (team: replace with your team)",
   "approved_by": "Consortium Steering Committee (team: replace with your governance owner)",
   "purpose": "Answer descriptive, diagnostic, predictive and prescriptive questions about students at risk of failing a core course across the four departments, and arrange advising outreach and tutoring referrals for high-risk enrollments at the home department. Decision support only.",
 
   "allowed_tools": ["summarize_member", "segment_breakdown", "trend_by_month",
-                    "compare_members", "rank_drivers",
+                    "compare_members", "rank_drivers", "compare_month_over_month", "segment_rates_all_members",
+                    "segment_driver", "driver_signs_all_members", "calibration_check",
                     "model_card_facts", "predict_record", "rank_records_by_risk",
                     "recommend_action", "refer_to_tutoring", "send_advising_outreach", "notify_instructor"],
   "approval_required": ["send_advising_outreach", "notify_instructor"],
