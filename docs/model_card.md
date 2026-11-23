@@ -44,6 +44,9 @@ We tested three DP noise multipliers with secure aggregation enabled and the min
 
 Increasing the noise multiplier from 0.0 to 0.3 reduced overall accuracy by 1.19 percentage points. Real Estate had the largest decline over that interval, at 2.75 percentage points. At 1.0, overall accuracy narrowly cleared the 68% threshold, and all four departments performed worse than their local-only models.
 
+### Charter Decision (v1.1)
+The team agreed to keep secure aggregation enabled, the DP noise multiplier at 0.3, the overall accuracy threshold at 0.68, and the minimum department accuracy at 0.62. The 0.3 run achieved 74.88% overall accuracy, compared with 68.06% at 1.0. Raising the department accuracy floor to 0.74 blocked the run because Accounting scored 73.75%.
+
 ### Real Estate Driver Analysis
 The 'driver_signs_all_members' tool found weak positive correlations between weekly work hours and course failure in Accounting (+0.080), Business Analytics (+0.096), and Marketing (+0.085). Real Estate was the only department with a negative correlation (-0.117). These findings suggest that the relationship between work hours and course failure varies by department. For Real Estate, FedAvg achieved 75.0% accuracy on the neutral evaluation set, compared with 74.5% for the local-only model. Further feature-level analysis would be needed to determine whether the shared model captures the distinct relationship between weekly work hours and the outcome in Real Estate.
 
