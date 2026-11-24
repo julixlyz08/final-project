@@ -17,7 +17,7 @@
   "dp_noise_multiplier": 0.3,
 
   "min_global_accuracy": 0.68,
-  "min_member_accuracy": 0.62,
-  "max_member_accuracy_gap": 0.12,
+  "min_member_accuracy": 0.70,
+  "max_member_accuracy_gap": 0.05,
   "high_risk_threshold": 0.5
 }
